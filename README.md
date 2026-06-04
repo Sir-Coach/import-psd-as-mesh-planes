@@ -1,6 +1,6 @@
 # import-psd-as-mesh-planes
 
-A simple addon to allow importing of .psd files as image planes.\
+Allows importing of .psd files as image planes in Blender.\
 Check it out in Blender Extensions Platform! 
 [https://extensions.blender.org/import-psd-as-mesh-planes/](https://extensions.blender.org/add-ons/import-psd-as-mesh-planes/)
 
