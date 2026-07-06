@@ -1,8 +1,8 @@
 bl_info = {
     "name": "Import .PSD as Mesh Planes",
     "author": "byebyeLAN",
-    "version": (1, 0, 0),
-    "blender": (5, 0, 0),
+    "version": (1, 0, 2),
+    "blender": (4, 2, 0),
     "location": "File > Import > Import .PSD as Mesh Planes",
     "description": "Import .PSD with layers as image mesh planes.",
     "category": "Import-Export",
@@ -11,13 +11,11 @@ bl_info = {
 import bpy
 import struct
 import os
-from bpy.props import StringProperty, BoolProperty, FloatProperty
+from bpy.props import StringProperty, BoolProperty, FloatProperty, IntProperty
 from bpy_extras.io_utils import ImportHelper
 
 PSD_SIGNATURE = b"8BPS"
-
-# constant to scale down imported planes
-PIXEL_SIZE = 0.01
+PIXEL_SIZE = 0.001
 
 class PSDParseError(Exception):
     pass
@@ -187,7 +185,7 @@ def parse_psd(filepath):
                     "name": name,
                 })
 
-            # Read actual channel pixel payloads
+            # read actual channel pixel payloads
             for rec in records:
                 w = max(0, rec["right"] - rec["left"])
                 h = max(0, rec["bottom"] - rec["top"])
@@ -251,19 +249,18 @@ def create_plane(context, name, image, x, y, z, scale):
     transparent = nodes.new("ShaderNodeBsdfTransparent")
     mix = nodes.new("ShaderNodeMixShader")
 
+    links.new(tex.outputs["Color"], emission.inputs["Color"])
+    links.new(tex.outputs["Alpha"], mix.inputs["Fac"])
+    links.new(transparent.outputs[0], mix.inputs[1])
+    links.new(emission.outputs[0], mix.inputs[2])
+    links.new(mix.outputs[0], output.inputs["Surface"])
+
     # move nodes
     output.location = (0, 0)
     mix.location = (-150, 0)
     transparent.location = (-350, -100)
     emission.location = (-350, -200)
     tex.location = (-650, 0)
-
-
-    links.new(tex.outputs["Color"], emission.inputs["Color"])
-    links.new(tex.outputs["Alpha"], mix.inputs["Fac"])
-    links.new(transparent.outputs[0], mix.inputs[1])
-    links.new(emission.outputs[0], mix.inputs[2])
-    links.new(mix.outputs[0], output.inputs["Surface"])
 
     obj.data.materials.append(mat)
 
@@ -294,6 +291,7 @@ class IMPORT_OT_psd_layers(bpy.types.Operator, ImportHelper):
 
             # ordering psd imports by layer
             for layer in layers:
+
                 hidden = bool(layer["flags"] & 0x02)
                 if self.skip_hidden and hidden:
                     continue

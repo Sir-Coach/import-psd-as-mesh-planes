@@ -2,20 +2,20 @@ schema_version = "1.0.0"
 
 
 id = "import_psd_as_mesh_planes"
-version = "1.0.0"
+version = "1.0.2"
 name = "Import .PSD as Mesh Planes"
 tagline = "Allows importing of .PSD files into mesh planes"
 maintainer = "byebyeLAN"
 type = "add-on"
 
 # # Optional: link to documentation, support, source files, etc
-# website = "https://extensions.blender.org/add-ons/my-example-package/"
+website = "https://github.com/Sir-Coach/import-psd-as-mesh-planes"
 
 # # Optional: tag list defined by Blender and server, see:
 # # https://docs.blender.org/manual/en/dev/advanced/extensions/tags.html
-# tags = ["Import-Export", "Mesh"]
+tags = ["Import-Export", "Mesh"]
 
-blender_version_min = "5.0.0"
+blender_version_min = "4.2.0"
 # # Optional: Blender version that the extension does not support, earlier versions are supported.
 # # This can be omitted and defined later on the extensions platform if an issue is found.
 # blender_version_max = "5.1.0"
@@ -27,7 +27,7 @@ license = [
 ]
 # Optional: required by some licenses.
 copyright = [
-  "2026 byebyeLAN"
+  "2026, byebyeLAN"
 ]
 
 # # Optional: list of supported platforms. If omitted, the extension will be available in all operating systems.
