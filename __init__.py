@@ -15,7 +15,7 @@ from bpy.props import StringProperty, BoolProperty, FloatProperty, IntProperty
 from bpy_extras.io_utils import ImportHelper
 
 PSD_SIGNATURE = b"8BPS"
-PIXEL_SIZE = 0.001
+PIXEL_SIZE = 0.001 # constant used to scale down the mesh planes 
 
 class PSDParseError(Exception):
     pass
