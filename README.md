@@ -5,3 +5,7 @@ Check it out in Blender Extensions Platform!
 [https://extensions.blender.org/import-psd-as-mesh-planes/](https://extensions.blender.org/add-ons/import-psd-as-mesh-planes/)
 
 You may support me here: [Gumroad link](https://byebyelan.gumroad.com/l/import-psd-as-mesh-planes)
+
+Known Issues / Limitations:
+ - Only supports RGB 8-bit .psd files.
+ - Support for RGB 16-bit and full CYMK are planned for the future.
