@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Import .PSD as Mesh Planes",
     "author": "byebyeLAN",
-    "version": (1, 0, 2),
+    "version": (1, 1, 0),
     "blender": (4, 2, 0),
     "location": "File > Import > Import .PSD as Mesh Planes",
     "description": "Import .PSD with layers as image mesh planes.",
