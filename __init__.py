@@ -172,7 +172,30 @@ def parse_psd(filepath):
 
                 name = parse_pascal_name(r)
 
-                r.seek(extra_start + extra_len)
+                # parse additional layer info for unicode names and other data
+                # this allows non-english layer names to be imported as-is
+                # and not become gibberish
+                section_type = 0
+                while r.tell() < extra_start + extra_len:
+                    sig = r.read(4)
+                    if sig not in (b'8BIM', b'8B64'):
+                        # padding or invalid, break to avoid infinite loop
+                        break
+                    key = r.read(4)
+                    length = r.u32()
+                    data_start = r.tell()
+
+                    if key == b'luni':
+                        char_count = r.u32()
+                        raw_unicode = r.read(char_count * 2)
+                        try:
+                            name = raw_unicode.decode('utf-16-be').rstrip('\x00')
+                        except:
+                            pass   # keep the MacRoman name if decoding fails
+                    elif key in (b'lsct', b'lsdk'):
+                        section_type = r.u32()
+
+                    r.seek(data_start + ((length + 1) & ~1))
 
                 records.append({
                     "top": top,
