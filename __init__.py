@@ -274,7 +274,7 @@ class IMPORT_OT_psd_layers(bpy.types.Operator, ImportHelper):
 
     filter_glob: StringProperty(default="*.psd", options={'HIDDEN'})
     scale_factor: FloatProperty(name="Scale", description="Image scale based on overall .psd canvas size." , default=1.0, min=0.0001)
-    plane_spacing: FloatProperty(name="Z Offset", description="Offsets each mesh plane by the Z-axis.", default=0.001, min=0.0, precision=4)
+    plane_spacing: FloatProperty(name="Z Offset", description="Offsets each mesh plane by the Z-axis.", default=0.001, min=0.0, precision=3)
     skip_hidden: BoolProperty(name="Skip Hidden", description="Skips importing hidden layers.", default=True)
     pack_images: BoolProperty(name="Pack Images", description="Packs all imported images to this file.", default=True)
 
