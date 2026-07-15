@@ -8,5 +8,6 @@ You may support me here: [Gumroad link](https://byebyelan.gumroad.com/l/import-p
 
 Known Issues / Limitations:
  - Only supports RGB 8-bit .psd files.
- - Support for RGB 16-bit and full CYMK are planned for the future.
+ - Support for RGB 16-bit and 8/16-bit CYMK are planned for the future.
  - Layer Groups and Heirarchy are not imported, the layers are only sorted in Blender's Outliner alphabetically.
+ - Layer Masks, Effects, and Clipping Masks are not respected upon importing, and are instead treated similarly as regular Paint Layers.
