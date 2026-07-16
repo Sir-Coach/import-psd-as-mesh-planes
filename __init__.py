@@ -76,8 +76,33 @@ def parse_pascal_name(r):
     except:
         return "Layer"
 
-# 0 1 2 -1 correspond to rgba respectively
-def build_rgba(w, h, chan_data, opacity):
+# psd bit depth sampling
+# rgb 32-bit psd files are very buggy and will not be supported for now.
+def sample(data, index, depth):
+
+    if depth == 8:
+        return data[index] / 255.0
+
+    elif depth == 16:
+        i = index * 2
+        return struct.unpack(">H", data[i:i+2])[0] / 65535.0
+
+    raise PSDParseError(f"Unsupported bit depth: {depth}")
+
+# build rgba data
+def build_rgba(w, h, chan_data, opacity, depth):
+    bps = bytes_per_sample(depth)
+    pixel_count = w * h
+
+    # default fill colors
+    if depth == 8:
+        default_black = bytes([0]) * pixel_count
+        default_white = bytes([255]) * pixel_count
+    elif depth == 16:
+        default_black = b'\x00\x00' * pixel_count
+        default_white = b'\xff\xff' * pixel_count
+
+    # 0 1 2 -1 correspond to rgba respectively
     red_ch = chan_data.get(0, bytes([0]) * (w * h))
     grn_ch = chan_data.get(1, bytes([0]) * (w * h))
     blu_ch = chan_data.get(2, bytes([0]) * (w * h))
@@ -323,8 +348,7 @@ class IMPORT_OT_psd_layers(bpy.types.Operator, ImportHelper):
             # ordering psd imports by layer
             for layer in layers:
 
-                hidden = bool(layer["flags"] & 0x02)
-                if self.skip_hidden and hidden:
+                if self.skip_hidden and (layer["flags"] & 0x02):
                     continue
 
                 if layer["width"] == 0 or layer["height"] == 0:
