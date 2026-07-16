@@ -11,6 +11,7 @@ bl_info = {
 import bpy
 import struct
 import os
+import zlib
 from bpy.props import StringProperty, BoolProperty, FloatProperty, IntProperty
 from bpy_extras.io_utils import ImportHelper
 
@@ -37,6 +38,7 @@ class Reader:
     def s16(self): return struct.unpack(">h", self.read(2))[0]
     def u32(self): return struct.unpack(">I", self.read(4))[0]
     def s32(self): return struct.unpack(">i", self.read(4))[0]
+    def u64(self): return struct.unpack(">Q", self.read(8))[0]
     def skip(self, n): self.pos += n
     def tell(self): return self.pos
     def seek(self, pos): self.pos = pos
@@ -93,13 +95,13 @@ def build_rgba(w, h, chan_data, opacity):
     for y in reversed(range(h)):
         row_start = y * w
 
-        for x in (range(w)):
+        for x in range(w):
             i = row_start + x
 
-            append(red_ch[i] / 255.0)
-            append(grn_ch[i] / 255.0)
-            append(blu_ch[i] / 255.0)
-            append((alp_ch[i] / 255.0) * img_opacity)
+            append(sample(red_ch, i, depth))
+            append(sample(grn_ch, i, depth))
+            append(sample(blu_ch, i, depth))
+            append(sample(alp_ch, i, depth) * img_opacity)
 
     return px
 
@@ -305,6 +307,11 @@ class IMPORT_OT_psd_layers(bpy.types.Operator, ImportHelper):
     def execute(self, context):
         try:
             doc_w, doc_h, layers = parse_psd(self.filepath)
+
+            # proper abort system for .psd files with unreadable layer format
+            if not layers:
+                self.report({'WARNING'}, "Cannot detect layers in this file.")
+                return {'CANCELLED'}
 
             # get psd filename and make it a collection to store planes
             psd_filename = os.path.splitext(os.path.basename(self.filepath))[0]
