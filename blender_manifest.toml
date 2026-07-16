@@ -1,6 +1,5 @@
 schema_version = "1.0.0"
 
-
 id = "import_psd_as_mesh_planes"
 version = "1.5.0"
 name = "Import .PSD as Mesh Planes"
