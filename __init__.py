@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Import .PSD as Mesh Planes",
     "author": "byebyeLAN",
-    "version": (1, 1, 0),
+    "version": (1, 5, 0),
     "blender": (4, 2, 0),
     "location": "File > Import > Import .PSD as Mesh Planes",
     "description": "Import .PSD with layers as image mesh planes.",
@@ -135,6 +135,166 @@ def build_rgba(w, h, chan_data, opacity, depth):
             append(sample(alp_ch, i, depth) * img_opacity)
 
     return px
+
+# MILESTONE for 1.3: ZIP decompress prediction
+def decompress_zip_prediction(data, width, height, depth):
+    # resets predictor at each row
+    raw = zlib.decompress(data)
+    bps = bytes_per_sample(depth)
+
+    if depth == 8:
+        out = bytearray(raw)
+        idx = 0
+        for y in range(height):
+            idx += 1  # first byte is raw
+            for x in range(1, width):
+                out[idx] = (out[idx] + out[idx-1]) & 0xFF
+                idx += 1
+        return bytes(out[:width * height])
+
+    elif depth == 16:
+        out = bytearray(raw)
+        idx = 0
+        for y in range(height):
+            idx += 2  # first pixel is raw
+            for x in range(1, width):
+                prev = struct.unpack(">H", out[idx-2:idx])[0]
+                curr = struct.unpack(">H", out[idx:idx+2])[0]
+                val = (curr + prev) & 0xFFFF
+                out[idx:idx+2] = struct.pack(">H", val)
+                idx += 2
+        return bytes(out[:width * height * 2])
+
+    elif depth == 32:
+        out = bytearray(raw)
+        idx = 0
+        for y in range(height):
+            idx += 4  # first pixel is raw
+            for x in range(1, width):
+                prev = struct.unpack(">I", out[idx-4:idx])[0]
+                curr = struct.unpack(">I", out[idx:idx+4])[0]
+                val = (curr + prev) & 0xFFFFFFFF
+                out[idx:idx+4] = struct.pack(">I", val)
+                idx += 4
+        return bytes(out[:width * height * 4])
+
+    raise PSDParseError(f"Unsupported depth for ZIP prediction: {depth}")
+
+# read and decomp one channel's pixel data
+def read_channel_data(r, compression, width, height, depth, bps, clen):
+    if compression == 0:
+        return r.read(width * height * bps)
+    elif compression == 1:
+        row_lengths = [r.u16() for _ in range(height)]
+        payload = bytearray()
+        for rl in row_lengths:
+            row_bytes = width * bps
+            payload.extend(decode_packbits(r.read(rl), row_bytes))
+        return bytes(payload)
+    elif compression in (2, 3):
+        zip_data = r.read(clen - 2)
+        if compression == 2:
+            return zlib.decompress(zip_data)
+        else:
+            return decompress_zip_prediction(zip_data, width, height, depth)
+    else:
+        raise PSDParseError(f"Unsupported compression: {compression}")
+
+# MILESTONE for 1.3: Parse 16-bit RGB .psd files
+def parse_lr16_block(data: bytes, depth: int, version: int) -> list:
+    r = Reader(data)
+    bps = bytes_per_sample(depth)
+    layer_count = abs(r.s16())
+
+    records = []
+    for _ in range(layer_count):
+        top, left, bottom, right = r.s32(), r.s32(), r.s32(), r.s32()
+
+        ch_count = r.u16()
+        chs = []
+
+        for _ in range(ch_count):
+            cid = r.s16()
+            clen = r.u64() if version != 1 else r.u32()
+            chs.append((cid, clen))
+
+        r.read(8)  # blend mode + signature
+
+        opacity = r.read(1)[0]
+        clipping, flags = r.read(1)[0], r.read(1)[0]
+
+        r.read(1)  # filler
+
+        extra_len = r.u32()
+        extra_start = r.tell()
+
+        mask_len = r.u32()
+        r.skip(mask_len)
+
+        blend_len = r.u32()
+        r.skip(blend_len)
+
+        name = parse_pascal_name(r)
+
+        # parse additional layer info for unicode names and other data
+        # this allows non-english layer names to be imported as-is
+        # and not become gibberish
+        section_type = 0
+        while r.tell() < extra_start + extra_len:
+            sig = r.read(4)
+            if sig not in (b'8BIM', b'8B64'):
+                # padding or invalid, break to avoid infinite loop
+                break
+            key = r.read(4)
+            length = r.u32()
+            data_start = r.tell()
+
+            if key == b'luni':
+                char_count = r.u32()
+                raw_unicode = r.read(char_count * 2)
+                try:
+                    name = raw_unicode.decode('utf-16-be').rstrip('\x00')
+                except:
+                    pass   # keep the MacRoman name if decoding fails
+            elif key in (b'lsct', b'lsdk'):
+                section_type = r.u32()
+
+            r.seek(data_start + ((length + 1) & ~1))
+
+        records.append({
+            "top": top,
+            "left": left,
+            "bottom": bottom,
+            "right": right,
+            "channels": chs,
+            "opacity": opacity,
+            "flags": flags,
+            "name": name,
+        })
+
+    # read actual channel pixel payloads
+    layers = []
+    for rec in records:
+        w = max(0, rec["right"] - rec["left"])
+        h = max(0, rec["bottom"] - rec["top"])
+        chan_data = {}
+
+        for cid, clen in rec["channels"]:
+            if w == 0 or h == 0:
+                r.skip(clen)
+                continue
+
+            compression = r.u16()
+
+            payload = read_channel_data(r, compression, w, h, depth, bps, clen)
+            chan_data[cid] = payload
+
+        rec["pixels"] = build_rgba(w, h, chan_data, rec["opacity"], depth)
+        rec["width"] = w
+        rec["height"] = h
+        layers.append(rec)
+
+    return layers
 
 # psd file parser
 def parse_psd(filepath, flatten=False): # add flatten image check

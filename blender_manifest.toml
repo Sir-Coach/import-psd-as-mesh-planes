@@ -2,7 +2,7 @@ schema_version = "1.0.0"
 
 
 id = "import_psd_as_mesh_planes"
-version = "1.0.2"
+version = "1.5.0"
 name = "Import .PSD as Mesh Planes"
 tagline = "Allows importing of .PSD files into mesh planes"
 maintainer = "byebyeLAN"
@@ -57,7 +57,7 @@ copyright = [
 #
 # [permissions]
 # network = "Need to sync motion-capture data to server"
-files = "Import .PSD files from disk"
+files = "Import files from disk"
 # clipboard = "Copy and paste bone transforms"
 
 # # Optional: advanced build settings.
