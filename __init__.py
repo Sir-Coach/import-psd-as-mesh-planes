@@ -305,7 +305,9 @@ def parse_psd(filepath, flatten=False): # add flatten image check
 
     if r.read(4) != PSD_SIGNATURE:
         raise PSDParseError("Not a .PSD file.")
-    if r.u16() != 1:
+
+    version = r.u16()
+    if version != 1:
         raise PSDParseError("Unsupported .PSD version.")
 
     r.skip(6)
@@ -317,7 +319,7 @@ def parse_psd(filepath, flatten=False): # add flatten image check
 
     bps = bytes_per_sample(depth)
 
-    if color_mode not in (3):
+    if color_mode not in (3,): # cymk support will come later, add tuple for now
         raise PSDParseError("Only supports RGB .psd files.")
     if depth not in (8, 16):
         raise PSDParseError(f"Unsupported bit depth: {depth}")
