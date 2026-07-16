@@ -43,6 +43,12 @@ class Reader:
     def tell(self): return self.pos
     def seek(self, pos): self.pos = pos
 
+# define bytes per sample
+def bytes_per_sample(depth):
+    if depth == 8:   return 1
+    elif depth == 16: return 2
+    raise PSDParseError(f"Unsupported bit depth: {depth}")
+
 # psd decoder
 def decode_packbits(data, expected):
     out = bytearray()
@@ -103,10 +109,10 @@ def build_rgba(w, h, chan_data, opacity, depth):
         default_white = b'\xff\xff' * pixel_count
 
     # 0 1 2 -1 correspond to rgba respectively
-    red_ch = chan_data.get(0, bytes([0]) * (w * h))
-    grn_ch = chan_data.get(1, bytes([0]) * (w * h))
-    blu_ch = chan_data.get(2, bytes([0]) * (w * h))
-    alp_ch = chan_data.get(-1, bytes([255]) * (w * h))
+    red_ch = chan_data.get(0, default_black)
+    grn_ch = chan_data.get(1, default_black)
+    blu_ch = chan_data.get(2, default_black)
+    alp_ch = chan_data.get(-1, default_white)
 
     # store px as array for ram efficiency
     from array import array
@@ -131,7 +137,7 @@ def build_rgba(w, h, chan_data, opacity, depth):
     return px
 
 # psd file parser
-def parse_psd(filepath):
+def parse_psd(filepath, flatten=False): # add flatten image check
     with open(filepath, "rb") as f:
         data = f.read()
 
@@ -149,126 +155,186 @@ def parse_psd(filepath):
     depth = r.u16()
     color_mode = r.u16()
 
-    if depth != 8 or color_mode != 3:
-        raise PSDParseError("Only 8-bit RGB .PSD supported.")
+    bps = bytes_per_sample(depth)
 
-    # skip color mode data section
-    r.skip(r.u32())
-
-    # skip image resources section
-    r.skip(r.u32())
+    if color_mode not in (3):
+        raise PSDParseError("Only supports RGB .psd files.")
+    if depth not in (8, 16):
+        raise PSDParseError(f"Unsupported bit depth: {depth}")
+    
+    r.skip(r.u32()) # skip color mode data section
+    r.skip(r.u32()) # skip image resources section
 
     # layer and mask info section
     layer_mask_len = r.u32()
+    layer_mask_end = r.tell() + layer_mask_len
     layers = []
 
-    if layer_mask_len > 0:
-        layer_info_len = r.u32()
+    # MILESTONE FOR 1.2: Allow flattening images upon import.
+    # Since .psd color data is already available, separate from
+    # layer and mask data, we can simply skip layer and mask checks,
+    # effectively flattening a .psd image
+    if flatten:
+        r.skip(layer_mask_len)
 
-        if layer_info_len > 0:
-            layer_count = abs(r.s16())
-            records = []
+    else:
+        if layer_mask_len > 0:
+            layer_info_len = r.u32()
 
-            for _ in range(layer_count):
-                top = r.s32()
-                left = r.s32()
-                bottom = r.s32()
-                right = r.s32()
+            if layer_info_len > 0:
+                layer_count = abs(r.s16())
 
-                ch_count = r.u16()
-                chs = []
-                for _ in range(ch_count):
-                    cid = r.s16()
-                    clen = r.u32()
-                    chs.append((cid, clen))
+                records = []
 
-                r.read(8)
+                for _ in range(layer_count):
+                    top = r.s32()
+                    left = r.s32()
+                    bottom = r.s32()
+                    right = r.s32()
 
-                opacity = r.read(1)[0]
-                clipping = r.read(1)[0]
-                flags = r.read(1)[0]
-                r.read(1)
+                    ch_count = r.u16()
+                    chs = []
+                    for _ in range(ch_count):
+                        cid = r.s16()
+                        clen = r.u32()
+                        chs.append((cid, clen))
 
-                extra_len = r.u32()
-                extra_start = r.tell()
+                    r.read(8)
 
-                mask_len = r.u32()
-                r.skip(mask_len)
-                blend_len = r.u32()
-                r.skip(blend_len)
+                    opacity = r.read(1)[0]
+                    clipping = r.read(1)[0]
+                    flags = r.read(1)[0]
+                    r.read(1)
 
-                name = parse_pascal_name(r)
+                    extra_len = r.u32()
+                    extra_start = r.tell()
 
-                # parse additional layer info for unicode names and other data
-                # this allows non-english layer names to be imported as-is
-                # and not become gibberish
-                section_type = 0
-                while r.tell() < extra_start + extra_len:
+                    mask_len = r.u32()
+                    r.skip(mask_len)
+                    blend_len = r.u32()
+                    r.skip(blend_len)
+
+                    name = parse_pascal_name(r)
+
+                    # parse additional layer info for unicode names and other data
+                    # this allows non-english layer names to be imported as-is
+                    # and not become gibberish
+                    section_type = 0
+                    while r.tell() < extra_start + extra_len:
+                        sig = r.read(4)
+                        if sig not in (b'8BIM', b'8B64'):
+                            # padding or invalid, break to avoid infinite loop
+                            break
+                        key = r.read(4)
+                        length = r.u32()
+                        data_start = r.tell()
+
+                        if key == b'luni':
+                            char_count = r.u32()
+                            raw_unicode = r.read(char_count * 2)
+                            try:
+                                name = raw_unicode.decode('utf-16-be').rstrip('\x00')
+                            except:
+                                pass   # keep the MacRoman name if decoding fails
+                        elif key in (b'lsct', b'lsdk'):
+                            section_type = r.u32()
+
+                        r.seek(data_start + ((length + 1) & ~1))
+
+                    records.append({
+                        "top": top,
+                        "left": left,
+                        "bottom": bottom,
+                        "right": right,
+                        "channels": chs,
+                        "opacity": opacity,
+                        "flags": flags,
+                        "name": name,
+                    })
+
+                for rec in records:
+                    w = max(0, rec["right"] - rec["left"])
+                    h = max(0, rec["bottom"] - rec["top"])
+                    chan_data = {}
+
+                    for cid, clen in rec["channels"]:   
+                        if w == 0 or h == 0:
+                            r.skip(clen)
+                            continue
+
+                        compression = r.u16()
+
+                        payload = read_channel_data(r, compression, w, h, depth, bps, clen)
+                        chan_data[cid] = payload
+
+                    rec["pixels"] = build_rgba(w, h, chan_data, rec["opacity"], depth)
+                    rec["width"], rec["height"] = w, h
+                    layers.append(rec)
+
+            # global tagged blocks
+            while r.tell() < layer_mask_end:
+                # not enough bytes left for even a tag signature -> skip to end
+                if r.tell() + 4 > layer_mask_end:
+                    r.skip(layer_mask_end - r.tell())
+                    break
+
+                peek = r.read(4)
+                r.seek(r.tell() - 4)
+
+                if peek == b'8BIM':
                     sig = r.read(4)
-                    if sig not in (b'8BIM', b'8B64'):
-                        # padding or invalid, break to avoid infinite loop
-                        break
                     key = r.read(4)
                     length = r.u32()
-                    data_start = r.tell()
 
-                    if key == b'luni':
-                        char_count = r.u32()
-                        raw_unicode = r.read(char_count * 2)
-                        try:
-                            name = raw_unicode.decode('utf-16-be').rstrip('\x00')
-                        except:
-                            pass   # keep the MacRoman name if decoding fails
-                    elif key in (b'lsct', b'lsdk'):
-                        section_type = r.u32()
-
-                    r.seek(data_start + ((length + 1) & ~1))
-
-                records.append({
-                    "top": top,
-                    "left": left,
-                    "bottom": bottom,
-                    "right": right,
-                    "channels": chs,
-                    "opacity": opacity,
-                    "flags": flags,
-                    "name": name,
-                })
-
-            # read actual channel pixel payloads
-            for rec in records:
-                w = max(0, rec["right"] - rec["left"])
-                h = max(0, rec["bottom"] - rec["top"])
-                chan_data = {}
-
-                for cid, clen in rec["channels"]:
-                    if w == 0 or h == 0:
-                        r.skip(clen)
-                        continue
-
-                    compression = r.u16()
-
-                    if compression == 0:
-                        payload = r.read(w * h)
-
-                    elif compression == 1:
-                        row_lengths = [r.u16() for _ in range(h)]
-                        payload = bytearray()
-                        for rl in row_lengths:
-                            payload.extend(decode_packbits(r.read(rl), w))
-                        payload = bytes(payload)
-
+                    # dont read beyond the section to avoid EOF
+                    if r.tell() + length > layer_mask_end:
+                        length = layer_mask_end - r.tell()
+                    if key in (b'Lr16', b'Lr32'):
+                        lr_data = r.read(length)
+                        layers.extend(parse_lr16_block(lr_data, depth, version))
                     else:
-                        # ZIP etc not implemented
-                        r.skip(clen - 2)
-                        payload = bytes([0] * (w * h))
+                        r.skip(length)
+                    # skip padding
+                    if length % 2 and r.tell() < layer_mask_end:
+                        r.skip(1)
 
-                    chan_data[cid] = payload
+                else:
+                    if r.tell() + 4 > layer_mask_end:
+                        r.skip(layer_mask_end - r.tell())
+                        break
+                    mask_info_len = r.u32()
+                    if r.tell() + mask_info_len > layer_mask_end:
+                        mask_info_len = layer_mask_end - r.tell()
+                    r.skip(mask_info_len)
 
-                rec["pixels"] = build_rgba(w, h, chan_data, rec["opacity"])
-                rec["width"] = w
-                rec["height"] = h
-                layers.append(rec)
+            # check if we're truly at the end of layermask section, prevents EOF
+            if r.tell() < layer_mask_end:
+                r.skip(layer_mask_end - r.tell())
+
+    # define the flattened mesh plane
+    if flatten:
+        psd_filename = os.path.splitext(os.path.basename(filepath))[0]
+        compression = r.u16()
+        chan_data = {}
+
+        for ch_id in range(channels):
+            payload = read_channel_data(r, compression, width, height, depth, bps, (width * height * bps) + 2)
+            chan_data[ch_id] = payload
+            
+        pixels = build_rgba(width, height, chan_data, 255, depth)
+
+        layers.append({
+            "name": f"{psd_filename}_Merged",
+            "width": width,
+            "height": height,
+            "left": 0,
+            "top": 0,
+            "right": width,
+            "bottom": height,
+            "opacity": 255,
+            "flags": 0,
+            "pixels": pixels,
+        })
 
     return width, height, layers
 
@@ -331,7 +397,7 @@ class IMPORT_OT_psd_layers(bpy.types.Operator, ImportHelper):
 
     def execute(self, context):
         try:
-            doc_w, doc_h, layers = parse_psd(self.filepath)
+            doc_w, doc_h, layers = parse_psd(self.filepath, flatten=self.flatten_image)
 
             # proper abort system for .psd files with unreadable layer format
             if not layers:
