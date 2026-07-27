@@ -1,13 +1,3 @@
-bl_info = {
-    "name": "Import .PSD as Mesh Planes",
-    "author": "byebyeLAN",
-    "version": (2, 4, 7),
-    "blender": (4, 2, 0),
-    "location": "File > Import > Import .PSD as Mesh Planes",
-    "description": "Import .PSD layers as image mesh planes.",
-    "category": "Import-Export",
-}
-
 import bpy
 import os
 import numpy as np
@@ -123,14 +113,14 @@ def create_plane(name, image, location, scale):
     return obj
 
 
-def import_psd_streaming(context, filepath, flatten, skip_hidden, pack_images,
-                         scale_factor, plane_spacing, root_collection):
+# Parse .psd file with streaming enabled for speed and ram efficiency
+def import_psd_streaming(context, filepath, flatten, skip_hidden, pack_images, scale_factor, plane_spacing, root_collection):
     psd = PSDImage.open(filepath)
     doc_w = psd.width
     doc_h = psd.height
     color_mode = psd.color_mode
 
-    if psd.depth == 32:
+    if psd.depth not in (8, 16):
         raise RuntimeError("Unsupported bit depth.")
 
     start_time = time.time()
@@ -190,55 +180,18 @@ def import_psd_streaming(context, filepath, flatten, skip_hidden, pack_images,
             parent_col.children.link(col)
 
     if flatten:
-        def collect_visible(container, parent_hidden=False):
-            items = []
-            for layer in container:
-                if layer.is_group():
-                    # If the group itself is hidden (and skip_hidden is on), skip the whole group
-                    if skip_hidden and (parent_hidden or not layer.visible):
-                        continue
-                    items.extend(collect_visible(layer, parent_hidden=parent_hidden))
-                else:
-                    if skip_hidden and (parent_hidden or not layer.visible):
-                        continue
-                    if layer.kind != 'pixel':
-                        continue
-                    if layer.width > 0 and layer.height > 0:
-                        items.append(layer)
-            return items
+        composite = psd.composite()
+        array = np.array(composite)
+        if array is None or array.size == 0:
+            return doc_w, doc_h, 0, 0.0
 
-        all_layers = collect_visible(psd)
-        result = np.zeros((doc_h, doc_w, 4), dtype=np.float32)
-
-        for layer in all_layers:
-            array = layer.numpy()
-            if array is None:
-                continue
-            rgba = _raw_to_rgba_topdown(array, color_mode, layer.opacity)
-            x1 = layer.left
-            y1 = layer.top
-            x2 = x1 + rgba.shape[1]
-            y2 = y1 + rgba.shape[0]
-            x1 = max(0, x1)
-            y1 = max(0, y1)
-            x2 = min(doc_w, x2)
-            y2 = min(doc_h, y2)
-            dest_region = result[y1:y2, x1:x2, :]
-            src_h = y2 - y1
-            src_w = x2 - x1
-            if src_h <= 0 or src_w <= 0:
-                continue
-            src_region = rgba[:src_h, :src_w, :]
-            src_alpha = src_region[:, :, 3:4]
-            dest_region[:, :, :3] = (src_region[:, :, :3] * src_alpha +
-                                     dest_region[:, :, :3] * (1.0 - src_alpha))
-            dest_region[:, :, 3] = src_alpha[:, :, 0] + dest_region[:, :, 3] * (1.0 - src_alpha[:, :, 0])
-
-        pixels = np.flipud(result).ravel().tolist()
-        del result
+        rgba = _raw_to_rgba_topdown(array, color_mode, 255)
+        pixels = np.flipud(rgba).ravel().tolist()
+        del rgba, array
+        w, h = composite.width, composite.height
 
         name = f"{os.path.splitext(os.path.basename(filepath))[0]}_Merged"
-        img = bpy.data.images.new(name, width=doc_w, height=doc_h, alpha=True)
+        img = bpy.data.images.new(name, width=w, height=h, alpha=True)
         img.pixels = pixels
         if pack_images:
             img.pack()
@@ -246,11 +199,15 @@ def import_psd_streaming(context, filepath, flatten, skip_hidden, pack_images,
         obj = create_plane(name, img, (0, 0, 0), 0.001 * scale_factor)
         root_collection.objects.link(obj)
         total_layers[0] = 1
+        elapsed = time.time() - start_time
+        return doc_w, doc_h, 1, elapsed
+
     else:
         walk(psd, root_collection)
 
     elapsed = time.time() - start_time
     return doc_w, doc_h, total_layers[0], elapsed
+
 
 class IMPORT_OT_psd_layers(bpy.types.Operator, ImportHelper):
     bl_idname = "import_scene.psd_layers"
@@ -285,8 +242,9 @@ class IMPORT_OT_psd_layers(bpy.types.Operator, ImportHelper):
                 self.report({'WARNING'}, "No layers found.")
                 return {'CANCELLED'}
 
-            self.report({'INFO'}, f"Imported {total} planes in {elapsed:.3f} seconds.")
-            print(f"Imported {total} planes in {elapsed:.3f} seconds.")
+            s = "" if total == 1 else "s" # pluralization
+            self.report({'INFO'}, f"Imported {total} plane{s} in {elapsed:.3f} seconds.") # info panel print
+            print(f"Imported {total} plane{s} in {elapsed:.3f} seconds.") # console print
             return {'FINISHED'}
 
         except Exception as e:
