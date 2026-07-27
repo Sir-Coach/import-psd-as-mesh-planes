@@ -8,7 +8,7 @@ Credits to:
  - Koga Yamaguchi (@kyamagu) for the amazing [PSD-Tools Python Library](https://github.com/psd-tools/psd-tools)
  - Hynek Schlawak (attrs Python Library)
 
-You may support me here: [Gumroad link](https://byebyelan.gumroad.com/l/import-psd-as-mesh-planes)
+Like the addon? [Buy me a coffee!](https://ko-fi.com/byebyelan)
 
 Known Issues / Limitations:
  - PSD files come in different types, only 8/16 bit RGB and CMYK files are officially supported, the other types may or may not fail.
